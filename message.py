@@ -1,9 +1,10 @@
 from enum import Enum
 import json
+# Define message type
 class Msg_Type(Enum):
     REQUEST = 0
     RESPONSE = 1
-
+# Define header type
 class Header_Type(Enum):
     LOGIN = 0
     LOGOUT = 1
@@ -16,15 +17,16 @@ class message:
     MsgType = None
     content = None
 
-    def __init__(self, HeaderType = None, MsgType = None, content = None, json_str = None):
-        if json_str is not None:
-            data = json.loads(json_str)
-            header_type = Header_Type[data['Header']]
-            msg_type = Msg_Type[data['MessageType']]
-            content = data['Content']
-
-        self.header_type = header_type
-        self.msg_type = msg_type
+    #unpack message
+    def __init__(self, HeaderType = None, MsgType = None, content = None, JsonStr = None):
+        if (JsonStr != None):
+            string = loads(JsonStr)
+            HeaderType = HeaderType(string['Header'])
+            MsgType = Msg_Type(string['MessageType'])
+            content = string['Content']
+        
+        self.HeaderType = HeaderType
+        self.MsgType = MsgType
         self.content = content
 
 
