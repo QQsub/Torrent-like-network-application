@@ -18,15 +18,15 @@ class message:
     content = None
 
     #unpack message
-    def __init__(self, HeaderType = None, MsgType = None, content = None, JsonStr = None):
-        if (JsonStr != None):
-            string = loads(JsonStr)
-            HeaderType = HeaderType(string['Header'])
-            MsgType = Msg_Type(string['MessageType'])
-            content = string['Content']
-        
-        self.HeaderType = HeaderType
-        self.MsgType = MsgType
+    def __init__(self, header_type=None, msg_type=None, content=None, json_str=None):
+        if json_str is not None:
+            data = json.loads(json_str)
+            header_type = Header_Type[data['Header']]
+            msg_type = Msg_Type[data['MessageType']]
+            content = data['Content']
+
+        self.header_type = header_type
+        self.msg_type = msg_type
         self.content = content
 
 
