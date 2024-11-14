@@ -1,9 +1,8 @@
 import hashlib
 import bencodepy
 import requests
+import utils
 
-max_retries = 3     # Number of retries
-timeout= 2          # Timeout
 def parse_torrent_file(filename):
     #Parse a .torrent file and return the data.
     try:
