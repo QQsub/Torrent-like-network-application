@@ -12,7 +12,15 @@ def parse_torrent_file(filename):
         if b'info' not in data:
             raise ValueError("Invalid torrent file: missing 'info' key.")
         
-        return data
+         # Get announce URL (the tracker URL)
+        announce_url = data.get(b'announce', None)
+        if announce_url:
+            announce_url = announce_url.decode('utf-8')
+        else:
+            print("No announce URL found in the torrent file.")
+
+        return data, announce_url
+        
     except FileNotFoundError:
         print(f"File not found: {filename}")
         return None
