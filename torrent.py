@@ -47,9 +47,9 @@ def fetch_torrent_file(info_hash, tracker_url):
     headers = {
         'User-Agent': 'Torrent Client'
     }   
-    for attempt in range(max_retries):
+    for attempt in range(utils.max_retries):
         try:
-            response = requests.get(tracker_url, params=params, headers=headers, timeout=timeout)
+            response = requests.get(tracker_url, params=params, headers=headers, timeout=utils.timeout)
             if response.status_code == 200:
                 print("Successfully fetched torrent file from tracker.")
                 return response.content  # Return torrent data as bytes
