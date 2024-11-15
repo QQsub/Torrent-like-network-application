@@ -21,7 +21,6 @@ torrent_data = {
         ]
     }
 }
-
 encoded_data = bencodepy.encode(torrent_data)
 
 # Save the bencoded data to a .torrent file

@@ -1,1 +1,1 @@
-d8:announce36:http://tracker1.example.com/announce4:infod12:piece lengthi262144e6:pieces19:AAAAAAAAAAAAAAAAAAA4:name17:example_file1.txt6:lengthi1234567eee
+d8:announce36:http://tracker1.example.com/announce4:infod12:piece lengthi262144e6:pieces38:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4:name14:example_folder5:filesld6:lengthi1234567e4:pathl17:example_file1.txteed6:lengthi2345678e4:pathl17:example_file2.txteed6:lengthi3456789e4:pathl17:example_file3.txteeeee
