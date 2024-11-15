@@ -14,7 +14,7 @@ torrent_data = {
 encoded_data = bencodepy.encode(torrent_data)
 
 # Save the bencoded data to a .torrent file
-torrent_file = 'sample.torrent'
+torrent_file = 'Sample/sample.torrent'
 with open(torrent_file, 'wb') as f:
     f.write(encoded_data)
 
