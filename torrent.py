@@ -86,3 +86,42 @@ def parse_metainfo(torrent_data):
         'pieces': pieces,
         'files': files
     }
+
+# Calculate number of pieces in files
+def piece_count(files, piece_length):
+    if not piece_length or not files:
+        raise ValueError("Piece length and files unavailable.")
+    total_size = sum(file['length'] for file in files)
+    return (total_size + piece_length - 1) // piece_length  # Ceiling division
+
+
+#Mapping piece -> files
+def map_pieces_to_files(files, piece_length):
+    if not piece_length or not files:
+        raise ValueError("Piece length and files unavailable.")
+
+    piece_to_file_map = []
+    file_index = 0
+    file_offset = 0
+    current_piece_offset = 0
+
+    for piece_index in range(piece_count(files, piece_length)):
+        piece_size = min(piece_length, files[file_index]['length'] - file_offset)
+
+        piece_to_file_map.append({
+            'piece_index': piece_index,
+            'file_index': file_index,
+            'file_offset': file_offset,
+            'piece_offset': current_piece_offset,
+            'length': piece_size
+        })
+
+        file_offset += piece_size
+        current_piece_offset = 0
+
+        # Move to the next file
+        while file_index < len(files) and file_offset >= files[file_index]['length']:
+            file_offset -= files[file_index]['length']
+            file_index += 1
+
+    return piece_to_file_map
