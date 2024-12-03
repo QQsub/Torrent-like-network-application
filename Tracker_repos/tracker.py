@@ -11,61 +11,63 @@ TRACKER_PORT = 12340                        # Default port for the tracker
 TRACKER_ID = "center_tracker"               # Center tracker id
 COMPACT_FLAG = False                        # Compact flag for compacted peer list response
 CONNECTION_TIMEOUT = 10                     # Default timeout for server connections (seconds)
-WARNING_MESSAGE = 'Some peers may be inactive.'
+WARNING_MESSAGE = "Some peers may be inactive."
+# File to torrent lookup
+TORRENTS = {
+    "random_2MB.txt": "TORRENT_1.torrent",
+    "random_4MB.txt": "TORRENT_1.torrent",
+    "random_8MB.txt": "TORRENT_2.torrent",
+}
 # Dictionary to hold torrent data and peers information
 torrent_data = {}                           # Tracks all available torrents by info_hash
 peers = {}                                  # Tracks peers for each torrent by info_hash
 TORRENT_DIR = 'Torrent-like-network-application/Tracker_repos/torrents'    # Directory to store the .torrent files
 ########## End of Configuration ##########
 
-
 # Create the torrent directory if it doesn't exist
 if not os.path.exists(TORRENT_DIR):
     os.makedirs(TORRENT_DIR)
 
-torrent_file_path = r"C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Sample\sample.torrent"
 # Load and parse a .torrent file to extract metadata
-def load_torrent_metadata(torrent_file_path):
+def parse_torrent_file(torrent_file_path):
     try:
-        # Read the torrent file and decode it
+        # Read and decode the torrent file using bencode
         with open(torrent_file_path, 'rb') as f:
-            data = bencodepy.decode(f.read())
-        
-        # Compute the info_hash
-        info_hash = hashlib.sha1(bencodepy.encode(data[b'info'])).digest()
+            torrent_data = bencodepy.decode(f.read())
 
-        # Handle single file or multiple files
-        files = []
-        if b'files' in data[b'info']:
-            files = data[b'info'][b'files']
-        else:
-            # Single file, ensure it's in the same format (list)
-            files = [{"length": data[b'info'][b'length'], "path": [data[b'info'][b'name']]}]
+        # Compute the info hash by hashing the Bencoded "info" dictionary
+        info_hash = hashlib.sha1(bencodepy.encode(torrent_data[b"info"])).hexdigest()
 
-        # Generate the magnet link
-        magnet_link = generate_magnet_link(info_hash)
-        
-        # Ensure TORRENT_DIR exists
-        if not os.path.exists(TORRENT_DIR):
-            os.makedirs(TORRENT_DIR)
-
-        # Save the torrent file in the appropriate directory based on info_hash
-        torrent_file_name = f"{info_hash.hex()}.torrent"
-        torrent_file_path = os.path.join(TORRENT_DIR, torrent_file_name)
-        with open(torrent_file_path, 'wb') as f_torrent:
-            f_torrent.write(bencodepy.encode(data))
-        
-        # Update the torrent_data dictionary
-        torrent_data[info_hash] = {
-            'torrent_file_path': torrent_file_path,
-            'magnet_link': magnet_link,
-            'files': files,
-            'downloaded_pieces': {},  # To track downloaded pieces for peers
+        # Initialize metainfo dictionary
+        metainfo = {
+            # "tracker": torrent_data[b"announce"].decode(),  # Get the tracker URL
+            "info_hash": info_hash,  # Info hash
+            "piece_length": torrent_data[b"info"][b"piece length"],  # Piece length
+            "pieces": [torrent_data[b"info"][b"pieces"][i:i + 20].hex() for i in range(0, len(torrent_data[b"info"][b"pieces"]), 20)],  # List of pieces
         }
-        
-        print(f"Torrent file saved: {torrent_file_name}")
+
+        # Handle multiple or single files
+        if b"files" in torrent_data[b"info"]:
+            # Multiple files
+            metainfo["files"] = [
+                {
+                    "path": "/".join([part.decode() for part in file[b"path"]]),  # Join path components
+                    "length": file[b"length"]
+                }
+                for file in torrent_data[b"info"][b"files"]
+            ]
+        else:
+            # Single file
+            metainfo["files"] = [{
+                "path": torrent_data[b"info"][b"path"].decode(),  # Single file path
+                "length": torrent_data[b"info"][b"length"]
+            }]
+
+        return metainfo
+
     except Exception as e:
-        print(f"Error loading torrent file: {e}")
+        print(f"Error parsing torrent file: {e}")
+        return None
 
 # Generate a magnet link from info_hash
 def generate_magnet_link(info_hash):
@@ -73,20 +75,19 @@ def generate_magnet_link(info_hash):
 
 # Parse the announce request data
 def parse_announce_data(data):
-    """ Parse the announce message to extract the required parameters """
+    # arse the announce message to extract the required parameters
     params = {}
     try:
         data_dict = json.loads(data)
-        params['info_hash'] = data_dict.get('info_hash')
+        params['file_name'] = data_dict.get('file_name')
         params['peer_id'] = data_dict.get('peer_id')
         params['port'] = data_dict.get('port')
         params['ip'] = data_dict.get('ip')
         params['event'] = data_dict.get('event', 'started')
-        params['downloaded'] = data_dict.get('downloaded', 0)
-        params['uploaded'] = data_dict.get('uploaded', 0)
         params['compact'] = data_dict.get('compact', COMPACT_FLAG)
         params['downloaded_pieces'] = data_dict.get('downloaded_pieces', [])  # Pieces downloaded by the peer
-        params['available_pieces'] = data_dict.get('available_pieces', [])    # ALready available pieces on peer
+        params['uploaded_pieces'] = data_dict.get('uploaded_pieces', [])  # Pieces uploaded by the peer
+        params['available_pieces'] = data_dict.get('available_pieces', [])    # Already available pieces on peer
         params['tracker_id'] = data_dict.get('tracker_id')  # Extract the tracker ID
         return params
     except Exception as e:
@@ -105,98 +106,147 @@ def handle_announce(conn, data, addr):
         return
     
     # Extract the parameters
-    info_hash = params['info_hash']
+    file_name = params['file_name']
     peer_id = params['peer_id']
     port = params['port']
     ip = addr[0]
     event = params['event']
-    downloaded = params['downloaded']
-    uploaded = params['uploaded']
     downloaded_pieces = params.get('downloaded_pieces', [])  # List of downloaded pieces
+    uploaded_pieces = params.get('uploaded_pieces', [])     # List of uploaded pieces
     tracker_id = params.get('tracker_id')  # Optional tracker ID
     available_pieces = params.get('available_pieces', [])   #List of available pieces
+
     # Log the tracker_id 
     if tracker_id:
         print(f"Received tracker_id from peer: {tracker_id}")
-        
-    # Handle different events
-    if event == "started" or event == 'download':
-        print(f"Peer {peer_id} started downloading {info_hash}.")
-        if info_hash not in peers:
-            peers[info_hash] = []
 
+    #Get interested torrent from file_name
+    torrent_joined = TORRENTS[file_name]
+
+    if torrent_joined  == None:
+        print(1)
+    
+    # Handle different events
+    if event == "started":
+        print(f"Peer {peer_id} connected to tracker.")        
+        if torrent_joined not in peers:
+            peers[torrent_joined] = []
         # Add peer to the list
         peer_info = {
             "peer_id": peer_id,
             "ip": ip,
             "port": port,
-            "downloaded_pieces": downloaded_pieces  # Store downloaded pieces
+            "available_pieces": available_pieces,   #Store available pieces
+            "downloaded_pieces": downloaded_pieces,  # Store downloaded pieces
+            "uploaded_pieces": uploaded_pieces      # Store uploaded pieces
         }
         
         # Check if the peer already exists based on peer_id, ip, and port
         peer_exists = False
-        for peer in peers[info_hash]:
+        for peer in peers[torrent_joined]:
             if peer["peer_id"] == peer_info["peer_id"] and peer["ip"] == peer_info["ip"] and peer["port"] == peer_info["port"]:
                 peer["downloaded_pieces"] = peer_info["downloaded_pieces"]  # Update the downloaded_pieces
+                peer["uploaded_pieces"] = peer_info["uploaded_pieces"]  # Update the downloaded_pieces
                 peer_exists = True
                 break
 
         # If peer doesn't exist, append the new peer
         if not peer_exists:
-            peers[info_hash].append(peer_info)
-    
+            peers[torrent_joined].append(peer_info)
+
+    elif event == "download":
+        print(f"Peer {peer_id} start downloading {file_name}")
+        if torrent_joined not in peers:
+            peers[torrent_joined] = []
+
+        peer_info = {
+            "peer_id": peer_id,
+            "ip": ip,
+            "port": port,
+            "available_pieces": available_pieces,   #Store available pieces
+            "downloaded_pieces": downloaded_pieces,  # Store downloaded pieces
+            "uploaded_pieces": uploaded_pieces      # Store uploaded pieces
+        }
+        
+        # Check if the peer already exists based on peer_id, ip, and port
+        peer_exists = False
+        for peer in peers[torrent_joined]:
+            if peer["peer_id"] == peer_info["peer_id"] and peer["ip"] == peer_info["ip"] and peer["port"] == peer_info["port"]:
+                peer["downloaded_pieces"] = peer_info["downloaded_pieces"]  # Update the downloaded_pieces
+                peer["uploaded_pieces"] = peer_info["uploaded_pieces"]  # Update the downloaded_pieces
+                peer_exists = True
+                break
+
+        # If peer doesn't exist, append the new peer
+        if not peer_exists:
+            peers[torrent_joined].append(peer_info)
+    elif event == "upload":
+        print(f"Peer {peer_id} start uploading {file_name}")
+        if torrent_joined not in peers:
+            peers[torrent_joined] = []
+
+        peer_info = {
+            "peer_id": peer_id,
+            "ip": ip,
+            "port": port,
+            "available_pieces": available_pieces,   #Store available pieces
+            "downloaded_pieces": downloaded_pieces,  # Store downloaded pieces
+            "uploaded_pieces": uploaded_pieces      # Store uploaded pieces
+        }
+        
+        # Check if the peer already exists based on peer_id, ip, and port
+        peer_exists = False
+        for peer in peers[torrent_joined]:
+            if peer["peer_id"] == peer_info["peer_id"] and peer["ip"] == peer_info["ip"] and peer["port"] == peer_info["port"]:
+                peer["downloaded_pieces"] = peer_info["downloaded_pieces"]  # Update the downloaded_pieces
+                peer["uploaded_pieces"] = peer_info["uploaded_pieces"]  # Update the downloaded_pieces
+                peer_exists = True
+                break
+
+        # If peer doesn't exist, append the new peer
+        if not peer_exists:
+            peers[torrent_joined].append(peer_info)
     elif event == "stopped":
-        print(f"Peer {peer_id} stopped downloading {info_hash}.")
+        print(f"Peer {peer_id} stopped and quit the torrent: {torrent_joined}.")
         # Remove peer from the list
-        peers[info_hash] = [peer for peer in peers[info_hash] if peer["peer_id"] != peer_id]
+        peers[torrent_joined] = [peer for peer in peers[torrent_joined] if peer["peer_id"] != peer_id]
     
     elif event == "completed":
-        print(f"Peer {peer_id} completed downloading {info_hash}.")
-        # Mark peer as completed
-        for peer in peers[info_hash]:
-            if peer["peer_id"] == peer_id:
-                peer["completed"] = True  # You can add a 'completed' flag
+        print(f"Peer {peer_id} completed downloading/uploading {file_name}.")
 
     # Respond with tracker information
-    response = generate_announce_response(info_hash)
+    response = generate_announce_response(torrent_joined, peer_id)
     conn.sendall(response.encode('utf-8'))
 
 # Generate the tracker response
-def generate_announce_response(info_hash):
+def generate_announce_response(torrent_joined, current_peer_id):
     response_data = {}
 
-    # If no peers for this info_hash, return an error
-    if info_hash not in peers:
+    # If no peers for this torrent, return an error
+    if torrent_joined not in peers:
         response_data['failure reason'] = 'No peers found for this torrent.'
         return json.dumps(response_data)
 
-    peer_list = peers[info_hash]
-
     # Optional Warning Message
     response_data['warning message'] = WARNING_MESSAGE
-
     # Add tracker_id
     response_data['tracker id'] = TRACKER_ID
 
     # Handle compact peer list
     if COMPACT_FLAG:
         compact_peers = []
-        for peer in peer_list:
-            ip = peer["ip"]
-            port = peer["port"]
-            peer_id = peer["peer_id"]
-            compact_peers.append(f"{ip}:{port}:{peer_id}")  # Simplified representation
+        for peer in peers[torrent_joined]:
+            if peer["peer_id"] != current_peer_id:
+                ip = peer["ip"]
+                port = peer["port"]
+                peer_id = peer["peer_id"]
+                compact_peers.append(f"{ip}:{port}:{peer_id}")  # Simplified representation
         response_data['peers'] = compact_peers
     else:
-        response_data['peers'] = peer_list
+        response_data['peers'] = [peer for peer in peers[torrent_joined] if peer["peer_id"] != current_peer_id]
 
-    # Include multi-file torrent details
-    if info_hash in torrent_data:
-        torrent_info = torrent_data[info_hash]
-        response_data['magnet_link'] = torrent_info['magnet_link']
-        response_data['files'] = torrent_info['files']  # Multi-file information
-
-    print(response_data)
+    # Include metadata of the torrent if started event
+    response_data['metadata'] = parse_torrent_file(os.path.join(TORRENT_DIR, torrent_joined))
     return json.dumps(response_data)
 
 # Start the tracker server

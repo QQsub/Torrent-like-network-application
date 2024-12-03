@@ -4,14 +4,12 @@ import os
 from pathlib import Path
 
 # Configuration
-TRACKER_URL = "http://192.168.77.147:12340"  # Tracker URL
 PIECE_LENGTH = 512 * 1024  # Size of each piece in bytes (512 KB)
 OUTPUT_TORRENT_FILE = Path(__file__).parent / "sample1.torrent"  # Path to save the generated torrent file
 root_directory = r"C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Sample"
 FILE_PATHS = [  # List of absolute file paths to include in the torrent
     "random_2MB.txt",
     "random_4MB.txt",
-    "random_8MB.txt",
 ]
 full_paths = [os.path.join(root_directory, file) for file in FILE_PATHS]
 # Directory for pieces
@@ -66,7 +64,7 @@ def create_torrent_file(output_path):
             all_pieces += b"".join(piece_hashes)
             
             files.append({
-                b"path": [file_path.parent.name.encode(), file_path.name.encode()],
+                b"path": [file_path.name.encode()],
                 b"length": file_length
             })
 
@@ -80,7 +78,6 @@ def create_torrent_file(output_path):
 
         # Define the top-level dictionary to be bencoded
         torrent_data = {
-            b"announce": TRACKER_URL.encode(),  # Tracker URL
             b"info": info  # Info about the files
         }
 
