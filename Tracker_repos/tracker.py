@@ -4,9 +4,12 @@ import os
 import socket
 import threading
 import bencodepy
+import signal
+import sys
+import zlib
 
 ########## Configuration ##########
-IPV4_ADDRESS = '192.168.77.147'            # Tracker host machine address
+IPV4_ADDRESS = '192.168.130.147'            # Tracker host machine address
 TRACKER_PORT = 12340                        # Default port for the tracker
 TRACKER_ID = "center_tracker"               # Center tracker id
 COMPACT_FLAG = False                        # Compact flag for compacted peer list response
@@ -102,7 +105,8 @@ def handle_announce(conn, data, addr):
         response = {
             'failure reason': 'Invalid JSON data in the request.'
         }
-        conn.sendall(json.dumps(response).encode('utf-8'))
+        compressed_response = zlib.compress(json.dumps(response).encode('utf-8'))
+        conn.sendall(compressed_response)
         return
     
     # Extract the parameters
@@ -123,8 +127,8 @@ def handle_announce(conn, data, addr):
     #Get interested torrent from file_name
     torrent_joined = TORRENTS[file_name]
 
-    if torrent_joined  == None:
-        print(1)
+    # if torrent_joined  == None:
+    #     print(1)
     
     # Handle different events
     if event == "started":
@@ -180,43 +184,28 @@ def handle_announce(conn, data, addr):
         # If peer doesn't exist, append the new peer
         if not peer_exists:
             peers[torrent_joined].append(peer_info)
-    elif event == "upload":
-        print(f"Peer {peer_id} start uploading {file_name}")
-        if torrent_joined not in peers:
-            peers[torrent_joined] = []
 
-        peer_info = {
-            "peer_id": peer_id,
-            "ip": ip,
-            "port": port,
-            "available_pieces": available_pieces,   #Store available pieces
-            "downloaded_pieces": downloaded_pieces,  # Store downloaded pieces
-            "uploaded_pieces": uploaded_pieces      # Store uploaded pieces
-        }
-        
-        # Check if the peer already exists based on peer_id, ip, and port
-        peer_exists = False
-        for peer in peers[torrent_joined]:
-            if peer["peer_id"] == peer_info["peer_id"] and peer["ip"] == peer_info["ip"] and peer["port"] == peer_info["port"]:
-                peer["downloaded_pieces"] = peer_info["downloaded_pieces"]  # Update the downloaded_pieces
-                peer["uploaded_pieces"] = peer_info["uploaded_pieces"]  # Update the downloaded_pieces
-                peer_exists = True
-                break
-
-        # If peer doesn't exist, append the new peer
-        if not peer_exists:
-            peers[torrent_joined].append(peer_info)
     elif event == "stopped":
-        print(f"Peer {peer_id} stopped and quit the torrent: {torrent_joined}.")
-        # Remove peer from the list
-        peers[torrent_joined] = [peer for peer in peers[torrent_joined] if peer["peer_id"] != peer_id]
+        # Remove from all torrent
+        for torrent in peers.keys():
+            for i in peers[torrent]:
+                if i["peer_id"] == peer_id:
+                    print(f"Peer {peer_id} stopped and quit the torrent: {torrent}.")
+
+            peers[torrent] = [peer for peer in peers[torrent] if peer["peer_id"] != peer_id]
+
+        # print(f"Peer {peer_id} stopped and quit the torrent: {torrent_joined}.")
+        # # Remove peer from the list
+        # peers[torrent_joined] = [peer for peer in peers[torrent_joined] if peer["peer_id"] != peer_id]
     
     elif event == "completed":
         print(f"Peer {peer_id} completed downloading/uploading {file_name}.")
 
-    # Respond with tracker information
+    # Respond with tracker information 
     response = generate_announce_response(torrent_joined, peer_id)
-    conn.sendall(response.encode('utf-8'))
+    
+    compressed_response_2 = zlib.compress(response.encode('utf-8'))
+    conn.sendall(compressed_response_2)
 
 # Generate the tracker response
 def generate_announce_response(torrent_joined, current_peer_id):
@@ -256,16 +245,23 @@ def start_tracker():
     server.listen(10)
     print(f"Tracker server started on port {TRACKER_PORT}")
 
-    while True:
+    #while True:
+    while True: 
         conn, addr = server.accept()
         print(f"Connection from {addr}")
-        data = conn.recv(1024).decode('utf-8')
-        if data:
-            if "announce" in data:
-                handle_announce(conn, data, addr)
+        data = conn.recv(1024)
+        # Decompress the data
+        decompressed_data = zlib.decompress(data)
+        #decode
+        decoded_data = decompressed_data.decode('utf-8')
+        if decoded_data:
+            if "announce" in decoded_data:
+                handle_announce(conn, decoded_data, addr)
 
         conn.close()
+       
 
 # Start the tracker server in a separate thread
 server_thread = threading.Thread(target=start_tracker)
 server_thread.start()
+

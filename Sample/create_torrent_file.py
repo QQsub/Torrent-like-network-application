@@ -5,15 +5,14 @@ from pathlib import Path
 
 # Configuration
 PIECE_LENGTH = 512 * 1024  # Size of each piece in bytes (512 KB)
-OUTPUT_TORRENT_FILE = Path(__file__).parent / "sample1.torrent"  # Path to save the generated torrent file
+OUTPUT_TORRENT_FILE = Path(__file__).parent / "TORRENT_2.torrent"  # Path to save the generated torrent file
 root_directory = r"C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Sample"
 FILE_PATHS = [  # List of absolute file paths to include in the torrent
-    "random_2MB.txt",
-    "random_4MB.txt",
+    "random_8MB.txt",
 ]
 full_paths = [os.path.join(root_directory, file) for file in FILE_PATHS]
 # Directory for pieces
-PIECES_DIRECTORY = Path(r"C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Sample\Pieces\Torrent1")
+PIECES_DIRECTORY = Path(r"C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Sample\Pieces\Torrent2")
 
 # Function to divide a file into pieces and return their SHA1 hashes
 def divide_file(file_path, piece_size=PIECE_LENGTH):

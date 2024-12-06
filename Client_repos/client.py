@@ -6,13 +6,14 @@ import threading
 import time
 import bencodepy
 from urllib.parse import urlparse
+import zlib
 
 # Configuration section
 PEER_DOWNLOAD_DIR = "Torrent-like-network-application/Client_repos"  # Directory of client
-TRACKER_IP = '192.168.77.147'  # Tracker IP address
+TRACKER_IP = '192.168.130.147'  # Tracker IP address
 TRACKER_PORT = 12340  # Tracker Port
-PEER_PORT = 12341 # Peer port for download/upload
-PEER_ID = "peer_1"  # Unique peer ID for this client
+PEER_PORT = 12344 # Peer port for download/upload
+PEER_ID = "peer_4"  # Unique peer ID for this client
 PIECE_LENGTH = 512 * 1024  # Default piece length (512 KB)
 RETRY_COUNT = 3  # Number of retries for downloading a piece
 TRACKER_ID = None
@@ -20,10 +21,10 @@ COMPACT_FLAGS = False
 # Thread-safe set to keep track of downloaded pieces
 downloaded_pieces = set()
 download_lock = threading.Lock()
-#Node db directory
-directory_path = r'C:\Users\Administrator\Desktop\Assignment\Torrent-like-network-application\Node_repos\ClientDB'
-# Create directory to store downloaded pieces and state
-# os.makedirs(PEER_DOWNLOAD_DIR, exist_ok=True)
+# Thread-safe to keep track of uploaded pieces
+uploaded_pieces = set()
+upload_lock = threading.Lock()
+
 
 # Function to announce to tracker and get peer list
 def announce_to_tracker(file_name = None, event="started"):
@@ -53,10 +54,21 @@ def announce_to_tracker(file_name = None, event="started"):
             if TRACKER_ID is not None:
                 request["tracker_id"] = TRACKER_ID
 
-            print(request)
-            tracker_socket.sendall(json.dumps(request).encode("utf-8"))
-            response = tracker_socket.recv(4096).decode("utf-8")
-            response_data = json.loads(response)
+            # Convert the request to a JSON string
+            json_data = json.dumps(request)
+
+            # Compress the JSON string using zlib
+            compressed_data = zlib.compress(json_data.encode("utf-8"))
+
+            # tracker_socket.sendall(json.dumps(request).encode("utf-8"))
+            tracker_socket.sendall(compressed_data)
+
+            # Fix here:
+            response_data_recv = tracker_socket.recv(4096)
+            # Decompress the data
+            decompressed_data = zlib.decompress(response_data_recv)
+            #decode
+            response_data = json.loads(decompressed_data.decode('utf-8'))
 
             # Save tracker ID if present
             if "tracker id" in response_data:
@@ -71,26 +83,6 @@ def announce_to_tracker(file_name = None, event="started"):
     except Exception as e:
         print(f"Error announcing to tracker: {e}")
         return None
-
-# Function to load the available pieces from the local repository (will modify)
-def load_available_pieces(info_hash):
-    # Path to the pieces directory for the given info hash
-    pieces_dir = os.path.join(PEER_DOWNLOAD_DIR, f"{info_hash}_pieces")
-    
-    # List to store available piece hashes
-    available_pieces = []
-
-    # Check if the directory for the pieces exists
-    if os.path.exists(pieces_dir):
-        # Iterate through the files in the pieces directory
-        for piece_file in os.listdir(pieces_dir):
-            piece_path = os.path.join(pieces_dir, piece_file)
-
-            # Check if the file is a valid piece file (could be based on file extension or hash check)
-            if os.path.isfile(piece_path):
-                available_pieces.append(piece_file)  # Add piece hash to available pieces list
-    
-    return available_pieces
 
 def load_available_pieces():
     # List to store available pieces
@@ -111,10 +103,11 @@ def load_available_pieces():
                     all_available_pieces.append(piece_file)  # Add piece hash to available pieces list
 
     return all_available_pieces
+
 def load_downloaded_pieces():
-    return []
+    return list(downloaded_pieces)
 def load_uploaded_pieces():
-    return []
+    return list(uploaded_pieces)
 
 
 # Extract metadata for a specific file in a multi-file torrent.
@@ -148,10 +141,10 @@ def check_existing_pieces(metadata, pieces_dir):
     piece_length = metadata["piece_length"]
     num_pieces = len(metadata["pieces"])
     existing_pieces = []
-    print(metadata)
+    # print(metadata)
     for piece_index in range(num_pieces):
         piece_path = os.path.join(pieces_dir, metadata["pieces"][piece_index])
-        print(piece_path)
+        # print(piece_path)
         if os.path.exists(piece_path):
             # Validate the size of the piece
             piece_size = os.path.getsize(piece_path)
@@ -257,7 +250,7 @@ def download_piece_threaded(piece_index, peer, metadata, pieces_dir):
     # Try downloading from the peer
     if download_piece(piece_index, peer, metadata, pieces_dir):
         with download_lock:  # Ensure thread-safe access to shared downloaded_pieces set
-            downloaded_pieces.add(piece_index)
+            downloaded_pieces.add(metadata["pieces"][piece_index])
 
 # Peer-side function to handle incoming requests for pieces
 def handle_peer_connection(client_socket, pieces_dir, metadata):
@@ -290,6 +283,10 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
             # Send the piece data back to the client
             client_socket.send(piece_data)
             print(f"Sent piece {piece_index} to client.")
+
+            # Add it to uploaded pieces
+            with upload_lock:
+                uploaded_pieces.add(metadata["pieces"][piece_index])
         
         else:
             client_socket.send(b"ERROR: Invalid request format\n")
@@ -305,7 +302,7 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
 def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((peer_ip, peer_port))
-        s.listen(5)
+        s.listen(10)
         print(f"Peer server listening on {peer_ip}:{peer_port}...")
 
         while not stop_event.is_set():  # Keep running until stop_event is set
@@ -314,8 +311,13 @@ def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
                 client_socket, _ = s.accept()
                 print(f"Connection established with client.")
                 
-                # Handle the client's request for a piece
-                handle_peer_connection(client_socket, pieces_dir, metadata)
+                # Handle the client's request in a new thread
+                client_thread = threading.Thread(
+                    target=handle_peer_connection, 
+                    args=(client_socket, pieces_dir, metadata)
+                )
+                client_thread.daemon = True  # Ensure threads exit when main program exits
+                client_thread.start()
             except Exception as e:
                 if not stop_event.is_set():  # If the server is shutting down, ignore errors
                     print(f"Error handling connection: {e}")
@@ -333,7 +335,7 @@ def download_from_torrent(file_name, response):
 
     # Get metadata for the requested file
     file_metadata = get_file_metadata(metadata, file_name)
-    print(response)
+    # print(response)
     if not file_metadata:
         print(f"File '{file_name}' not found in torrent metadata.")
         return
@@ -404,53 +406,55 @@ def choose_file():
 def choose_option():
     while True:
         print("What do you want to do")
+        print("0. Just annouce tracker you are online")
         print("1. Download from others")
-        print("2. Upload to others")
-        print("3. Stop and exit from network")
+        print("2. Stop and exit from network")
         choice = input("Choose an option: ")
-        if choice == "1":
+        if choice == "0":
+            return "Announce"
+        elif choice == "1":
             return "Download"  
         elif choice == "2":
-            return "Upload"
-        elif choice == "3":
             return "Exit"
         else:
-            print("Invalid option. Please choose 1, 2 or 3.")
+            print("Invalid option. Please choose 0, 1 or 2.")
             continue
     return ""
 
 def main():
     stop_event = threading.Event()  # Event to signal the peer server to stop
     connected = False
-    
+    Online = False
     while True:
         option = choose_option()
         
         if option != "Exit":
-            file_name = choose_file()
-
-        if option == "Download":
-            response = announce_to_tracker(file_name, event="download")
-             # Start the peer server in a separate thread
-            peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], stop_event))
-            peer_thread.daemon = True
-            peer_thread.start()
-            connected = True
-            download_from_torrent(file_name, response)
-
-        elif option == "Upload":
-            response = announce_to_tracker(file_name, event="upload")
+            file_name = choose_file()    
+        if option == "Announce":
+            response = announce_to_tracker(file_name, event = "started")
             # Start the peer server in a separate thread
             peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], stop_event))
             peer_thread.daemon = True
             peer_thread.start()
             connected = True
+        if option == "Download":
+            # First online
+            if (Online == False):
+                response = announce_to_tracker(file_name, event = "started")
+                # Start the peer server in a separate thread
+                peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], stop_event))
+                peer_thread.daemon = True
+                peer_thread.start()
+                connected = True
+                Online = True
+                
+            response = announce_to_tracker(file_name, event="download")           
             download_from_torrent(file_name, response)
-
+            response = announce_to_tracker(file_name, event="completed")      
         elif option == "Exit":
             if connected:
                 response = announce_to_tracker(file_name, event="stopped")
-                download_from_torrent(file_name, response)
+                # download_from_torrent(file_name, response)
 
             # Signal the peer server to stop and wait for it to exit
             stop_event.set()
