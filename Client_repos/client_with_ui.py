@@ -4,17 +4,36 @@ import json
 import hashlib
 import os
 import threading
+from threading import Thread, Lock
 import time
 import bencodepy
 from urllib.parse import urlparse
 import zlib
+import queue
+
+# Global message queue for cross-thread communication
+message_queue = queue.Queue()
+
+# Function to process messages in the main thread
+def process_messages():
+    while not message_queue.empty():
+        msg = message_queue.get()
+        st.session_state.messages.append(msg)
+
+# Initialize session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = []  # Log messages
+# Lock for thread-safe operations
+lock = Lock()
+
+
 
 # Configuration section
-PEER_DOWNLOAD_DIR = "Torrent-like-network-application/Client_repos"  # Directory of client
+PEER_DOWNLOAD_DIR = "C:/Users/Admin/Desktop/Assignment/Torrent-like-network-application/Client_repos"  # Directory of client
 TRACKER_IP = '192.168.130.147'  # Tracker IP address
 TRACKER_PORT = 12340  # Tracker Port
-PEER_PORT = 12345 # Peer port for download/upload
-PEER_ID = "peer_5"  # Unique peer ID for this client
+PEER_PORT = 12341 # Peer port for download/upload
+PEER_ID = "peer_1"  # Unique peer ID for this client
 PIECE_LENGTH = 512 * 1024  # Default piece length (512 KB)
 RETRY_COUNT = 3  # Number of retries for downloading a piece
 TRACKER_ID = None
@@ -78,13 +97,13 @@ def announce_to_tracker(file_name = None, event="started"):
             # Log warning message if present
             if "warning message" in response_data:
                 print(f"Warning from tracker: {response_data['warning message']}")
-                st.write(f"Warning from tracker: {response_data['warning message']}")
+                message_queue.put(f"Warning from tracker: {response_data['warning message']}")
 
             return response_data
 
     except Exception as e:
         print(f"Error announcing to tracker: {e}")
-        st.write(f"Error announcing to tracker: {e}")
+        message_queue.put(f"Error announcing to tracker: {e}")
         return None
 
 def load_available_pieces():
@@ -155,7 +174,7 @@ def check_existing_pieces(metadata, pieces_dir):
                 existing_pieces.append(piece_index)
             else:
                 print(f"Invalid piece size for piece {piece_index}.")
-                st.write(f"Invalid piece size for piece {piece_index}.")
+                message_queue.put(f"Invalid piece size for piece {piece_index}.")
     
     return existing_pieces
 
@@ -196,7 +215,7 @@ def merge_pieces_for_file(metadata, file_metadata, pieces_dir, output_file_name)
                 output.write(piece_data[piece_start:piece_end])
 
     print(f"File successfully reconstructed: {output_file}")
-    st.write(f"File successfully reconstructed: {output_file}")
+    message_queue.put(f"File successfully reconstructed: {output_file}")
 
 def download_piece(piece_index, peer, metadata, pieces_dir):
     try:
@@ -222,7 +241,7 @@ def download_piece(piece_index, peer, metadata, pieces_dir):
             request = f"GET piece {piece_index} {start_byte} {end_byte}\n"
             s.send(request.encode())
             print(f"Requesting piece {piece_index} from {peer_ip}:{peer_port}")
-            st.write(f"Requesting piece {piece_index} from {peer_ip}:{peer_port}")
+            message_queue.put(f"Requesting piece {piece_index} from {peer_ip}:{peer_port}")
 
             # Receive the piece data from the peer
             piece_data = b""
@@ -235,7 +254,7 @@ def download_piece(piece_index, peer, metadata, pieces_dir):
             # Ensure the piece data is the correct length
             if len(piece_data) != piece_length:
                 print(f"Error: Incomplete piece received. Expected {piece_length} bytes, got {len(piece_data)} bytes.")
-                st.write(f"Error: Incomplete piece received. Expected {piece_length} bytes, got {len(piece_data)} bytes.")
+                message_queue.put(f"Error: Incomplete piece received. Expected {piece_length} bytes, got {len(piece_data)} bytes.")
                 return False
 
             # Write the downloaded piece data to a file
@@ -243,12 +262,12 @@ def download_piece(piece_index, peer, metadata, pieces_dir):
                 f.write(piece_data)
 
         print(f"Piece {piece_index} successfully downloaded.")
-        st.write(f"Piece {piece_index} successfully downloaded.")
+        message_queue.put(f"Piece {piece_index} successfully downloaded.")
         return True
 
     except Exception as e:
         print(f"Error downloading piece {piece_index} from {peer_ip}:{peer_port}: {e}")
-        st.write(f"Error downloading piece {piece_index} from {peer_ip}:{peer_port}: {e}")
+        message_queue.put(f"Error downloading piece {piece_index} from {peer_ip}:{peer_port}: {e}")
         return False
 
 def download_piece_threaded(piece_index, peer, metadata, pieces_dir):
@@ -267,7 +286,7 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
         # Receive the request from the client
         request = client_socket.recv(1024).decode()
         print(f"Received request: {request}")
-        st.write(f"Received request: {request}")
+        message_queue.put(f"Received request: {request}")
         
         # Parse the request (e.g., GET piece {index} {start_byte} {end_byte})
         if request.startswith("GET piece"):
@@ -283,7 +302,7 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
             piece_filename = os.path.join(pieces_dir, f'{metadata["pieces"][piece_index]}')
             if not os.path.exists(piece_filename):
                 print(f"Error: Piece {piece_index} not available.")
-                st.write(f"Error: Piece {piece_index} not available.")
+                message_queue.put(f"Error: Piece {piece_index} not available.")
                 client_socket.send(b"ERROR: Piece not available\n")
                 return
             
@@ -294,7 +313,7 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
             # Send the piece data back to the client
             client_socket.send(piece_data)
             print(f"Sent piece {piece_index} to client.")
-            st.write(f"Sent piece {piece_index} to client.")
+            message_queue.put(f"Sent piece {piece_index} to client.")
 
             # Add it to uploaded pieces
             with upload_lock:
@@ -305,7 +324,7 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
     
     except Exception as e:
         print(f"Error handling request: {e}")
-        st.write(f"Error handling request: {e}")
+        message_queue.put(f"Error handling request: {e}")
         client_socket.send(b"ERROR: Server error\n")
     
     finally:
@@ -315,16 +334,22 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
 def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((peer_ip, peer_port))
-        s.listen(10)
         print(f"Peer server listening on {peer_ip}:{peer_port}...")
-        st.write(f"Peer server listening on {peer_ip}:{peer_port}...")
-
+        
+        message_queue.put(f"Peer server listening on {peer_ip}:{peer_port}...")
+        print("Hello Check Point")
+        s.listen(10)
+        
         while not stop_event.is_set():  # Keep running until stop_event is set
             try:
+                if ( stop_event.is_set()):
+                    print("Stopping peeer server.")
+                    message_queue.put("Stopping peeer server.")
+                    break
                 # Accept incoming client connections
                 client_socket, _ = s.accept()
                 print(f"Connection established with client.")
-                st.write(f"Connection established with client.")
+                message_queue.put(f"Connection established with client.")
                 
                 # Handle the client's request in a new thread
                 client_thread = threading.Thread(
@@ -336,13 +361,13 @@ def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
             except Exception as e:
                 if not stop_event.is_set():  # If the server is shutting down, ignore errors
                     print(f"Error handling connection: {e}")
-                    st.write(f"Error handling connection: {e}")
+                    message_queue.put(f"Error handling connection: {e}")
 
 # Download the torrent
 def download_from_torrent(file_name, response):
     if not response or "failure reason" in response:
         print(f"Failed to announce to tracker: {response.get('failure reason')}")
-        st.write(f"Failed to announce to tracker: {response.get('failure reason')}")
+        message_queue.put(f"Failed to announce to tracker: {response.get('failure reason')}")
         return
 
     metadata = response["metadata"]
@@ -355,31 +380,31 @@ def download_from_torrent(file_name, response):
     # print(response)
     if not file_metadata:
         print(f"File '{file_name}' not found in torrent metadata.")
-        st.write(f"File '{file_name}' not found in torrent metadata.")
+        message_queue.put(f"File '{file_name}' not found in torrent metadata.")
         return
 
     # Calculate piece indices for the requested file
     file_piece_indices = get_file_piece_indices(metadata, file_metadata)
     print(f"File '{file_name}' spans pieces: {file_piece_indices}")
-    st.write(f"File '{file_name}' spans pieces: {file_piece_indices}")
+    message_queue.put(f"File '{file_name}' spans pieces: {file_piece_indices}")
 
     # Check existing pieces
     existing_pieces = check_existing_pieces(metadata, pieces_dir)
     relevant_existing_pieces = set(existing_pieces).intersection(file_piece_indices)
     print(f"Existing pieces for '{file_name}': {len(relevant_existing_pieces)}/{len(file_piece_indices)}")
-    st.write(f"Existing pieces for '{file_name}': {len(relevant_existing_pieces)}/{len(file_piece_indices)}")
+    message_queue.put(f"Existing pieces for '{file_name}': {len(relevant_existing_pieces)}/{len(file_piece_indices)}")
 
     # If all pieces are available, merge the file
     if len(relevant_existing_pieces) == len(file_piece_indices):
         print(f"All pieces for '{file_name}' are already downloaded. Merging...")
-        st.write(f"All pieces for '{file_name}' are already downloaded. Merging...")
+        message_queue.put(f"All pieces for '{file_name}' are already downloaded. Merging...")
         merge_pieces_for_file(metadata, file_metadata, pieces_dir, file_name)
         return
 
     # Identify missing pieces
     missing_pieces = list(set(file_piece_indices) - relevant_existing_pieces)
     print(f"Missing pieces for '{file_name}': {missing_pieces}")
-    st.write(f"Missing pieces for '{file_name}': {missing_pieces}")
+    message_queue.put(f"Missing pieces for '{file_name}': {missing_pieces}")
 
 
     # Download missing pieces
@@ -403,11 +428,11 @@ def download_from_torrent(file_name, response):
     # Merge the file if all pieces are downloaded
     if len(relevant_existing_pieces) == len(file_piece_indices):
         print(f"All pieces downloaded for '{file_name}'. Merging...")
-        st.write(f"All pieces downloaded for '{file_name}'. Merging...")
+        message_queue.put(f"All pieces downloaded for '{file_name}'. Merging...")
         merge_pieces_for_file(metadata, file_metadata, pieces_dir, file_name)
     else:
         print(f"Download incomplete for '{file_name}'. Missing pieces remain.")
-        st.write(f"Download incomplete for '{file_name}'. Missing pieces remain.")
+        message_queue.put(f"Download incomplete for '{file_name}'. Missing pieces remain.")
 
 def choose_file():
     st.write("Which file are you interested in:")
@@ -454,8 +479,14 @@ def list_files(directory):
 
 
 def main():
-    stop_event = threading.Event()  # Event to signal the peer server to stop
-    Online = False
+    # Initialize session state
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []  # Log messages
+        st.session_state.update_flag = False  # Flag to trigger UI update
+    if 'stop_event' not in st.session_state:
+        st.session_state.stop_event = threading.Event()  # Event to signal the peer server to stop
+    if 'online' not in st.session_state:
+        st.session_state.online = False
     if 'connected' not in st.session_state:
         st.session_state.connected = False
     st.set_page_config(page_title="My Streamlit App", layout="wide")
@@ -467,29 +498,17 @@ def main():
     # Input for the directory path
     col1, col2 = st.columns(2)
     with col1:
-        st.header("Output Directory")
-        directory = st.text_input("Enter the directory path:", value=".")
-        if directory:
-            files = list_files(directory)
-
-            if files:
-                st.write(f"Files in directory `{directory}`:")
-                for file in files:
-                    st.write(f"- {file}")
-            else:
-                st.write("No files found or invalid directory.")
-    with col2:
         st.header("WorkSpace")
 
         # Display options as radio buttons
         file_name = None
-        stop_event = threading.Event()  # Event to signal the peer server to stop
         try:
             option = choose_option()  
         except Exception as e:
             st.error(f"An error occurred: {e}")
         if option == "Announce":
-            file_name = choose_file()  
+            file_name = choose_file() 
+
             if st.button("SEND"):
                 if not file_name:
                     st.error("No file selected. Please choose a file to proceed.")
@@ -497,10 +516,11 @@ def main():
                     try:
                         response = announce_to_tracker(file_name, event = "started")
                         # Start the peer server in a separate thread
-                        peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], stop_event))
+                        peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
                         peer_thread.daemon = True
                         peer_thread.start()
                         st.session_state.connected = True
+                        st.session_state.online = True
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
         elif option == "Download":
@@ -511,14 +531,14 @@ def main():
                     st.error("No file selected. Please choose a file to proceed.")
                 else:
                     try:
-                        if (Online == False):
+                        if (st.session_state.online== False):
                             response = announce_to_tracker(file_name, event = "started")
                             # Start the peer server in a separate thread
-                            peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], stop_event))
+                            peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
                             peer_thread.daemon = True
                             peer_thread.start()
                             st.session_state.connected = True
-                            Online = True
+                            st.session_state.online = True
                         response = announce_to_tracker(file_name, event="download")           
                         download_from_torrent(file_name, response)
                         response = announce_to_tracker(file_name, event="completed")   
@@ -531,19 +551,33 @@ def main():
                 else:
                     st.write("Exit without connect to network")
                 # Signal the peer server to stop and wait for it to exit
-                stop_event.set()
+                st.session_state.stop_event .set()
                 time.sleep(1)  # Ensure the server has time to shut down
+                st.stop()
             except Exception as e:
                 st.error(f"An error occurred: {e}")
         else:
             st.write("Pls select an option")    
-        
         ### RESULT DISPLAY #####
-        st.write("Result Display")
+        # Display logs in the sidebar
+        st.sidebar.header("Result Logs")
+        process_messages()  # Update messages from the queue
+        for mess in st.session_state.messages:
+            st.sidebar.write(mess)
+    with col2:
+        st.header("Output Directory")
+        directory = st.text_input("Enter the directory path:", value=".")
+        if directory:
+            files = list_files(directory)
+
+            if files:
+                st.write(f"Files in directory `{directory}`:")
+                for file in files:
+                    st.write(f"- {file}")
+            else:
+                st.write("No files found or invalid directory.")
+
          
 
 if __name__ == "__main__":
     main()
-
-
-    

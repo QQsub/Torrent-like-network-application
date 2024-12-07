@@ -307,6 +307,11 @@ def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
 
         while not stop_event.is_set():  # Keep running until stop_event is set
             try:
+                # Check if stop_event is set before accepting connections
+                if stop_event.is_set():
+                    print("Stopping peer server...")
+                    break
+                
                 # Accept incoming client connections
                 client_socket, _ = s.accept()
                 print(f"Connection established with client.")
@@ -437,6 +442,7 @@ def main():
             peer_thread.daemon = True
             peer_thread.start()
             connected = True
+            Online = True
         if option == "Download":
             # First online
             if (Online == False):
