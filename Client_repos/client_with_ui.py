@@ -24,16 +24,15 @@ def process_messages():
 if 'messages' not in st.session_state:
     st.session_state.messages = []  # Log messages
 # Lock for thread-safe operations
-lock = Lock()
-
-
+lock = threading.Lock()
 
 # Configuration section
-PEER_DOWNLOAD_DIR = "C:/Users/Admin/Desktop/Assignment/Torrent-like-network-application/Client_repos"  # Directory of client
-TRACKER_IP = '192.168.130.147'  # Tracker IP address
+PEER_DOWNLOAD_DIR = "Torrent-like-network-application/Client_repos"  # Directory of client
+TRACKER_IP = '192.168.1.7'  # Tracker IP address
 TRACKER_PORT = 12340  # Tracker Port
-PEER_PORT = 12341 # Peer port for download/upload
-PEER_ID = "peer_1"  # Unique peer ID for this client
+PEER_IP = '0.0.0.0'    # Peer IP address to listen on -> 0.0.0.0 all IP
+PEER_PORT = 12344   # Peer port for download/upload
+PEER_ID = "peer_4"  # Unique peer ID for this client
 PIECE_LENGTH = 512 * 1024  # Default piece length (512 KB)
 RETRY_COUNT = 3  # Number of retries for downloading a piece
 TRACKER_ID = None
@@ -44,7 +43,6 @@ download_lock = threading.Lock()
 # Thread-safe to keep track of uploaded pieces
 uploaded_pieces = set()
 upload_lock = threading.Lock()
-
 
 # Function to announce to tracker and get peer list
 def announce_to_tracker(file_name = None, event="started"):
@@ -332,19 +330,17 @@ def handle_peer_connection(client_socket, pieces_dir, metadata):
 
 # Function to start the peer server (server listening for incoming connections)
 def start_peer_server(peer_ip, peer_port, pieces_dir, metadata, stop_event):
+    message_queue.put(f"Peer server listening on {peer_ip}:{peer_port}...")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((peer_ip, peer_port))
         print(f"Peer server listening on {peer_ip}:{peer_port}...")
-        
-        message_queue.put(f"Peer server listening on {peer_ip}:{peer_port}...")
-        print("Hello Check Point")
         s.listen(10)
         
         while not stop_event.is_set():  # Keep running until stop_event is set
             try:
-                if ( stop_event.is_set()):
-                    print("Stopping peeer server.")
-                    message_queue.put("Stopping peeer server.")
+                if (stop_event.is_set()):
+                    print("Stopping peer server.")
+                    message_queue.put("Stopping peer server.")
                     break
                 # Accept incoming client connections
                 client_socket, _ = s.accept()
@@ -437,8 +433,8 @@ def download_from_torrent(file_name, response):
 def choose_file():
     st.write("Which file are you interested in:")
     st.write("1. random_2MB.txt")
-    st.write("2. random_3MB.txt")
-    st.write("3. random_4MB.txt")
+    st.write("2. random_4MB.txt")
+    st.write("3. random_8MB.txt")
     choice = st.text_input("Enter a file number (0-2):", value="")
     if choice == "1":
         return "random_2MB.txt"   
@@ -477,7 +473,6 @@ def list_files(directory):
     except FileNotFoundError:
         return []       
 
-
 def main():
     # Initialize session state
     if 'messages' not in st.session_state:
@@ -515,12 +510,17 @@ def main():
                 else:
                     try:
                         response = announce_to_tracker(file_name, event = "started")
-                        # Start the peer server in a separate thread
-                        peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
-                        peer_thread.daemon = True
-                        peer_thread.start()
-                        st.session_state.connected = True
-                        st.session_state.online = True
+                        if st.session_state.online == False:
+                            # Start the peer server in a separate thread
+                            peer_thread = threading.Thread(target=start_peer_server, args=(PEER_IP, PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
+                            peer_thread.daemon = True
+                            peer_thread.start()
+                            st.session_state.connected = True
+                            st.session_state.online = True
+                        else:
+                            #In ra man hinh peer server already started at:  
+                            message_queue.put(f"Peer server already listening on {PEER_IP}:{PEER_PORT}...")
+                            st.session_state.connected = True
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
         elif option == "Download":
@@ -534,7 +534,7 @@ def main():
                         if (st.session_state.online== False):
                             response = announce_to_tracker(file_name, event = "started")
                             # Start the peer server in a separate thread
-                            peer_thread = threading.Thread(target=start_peer_server, args=("0.0.0.0", PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
+                            peer_thread = threading.Thread(target=start_peer_server, args=(PEER_IP, PEER_PORT, PEER_DOWNLOAD_DIR, response["metadata"], st.session_state.stop_event ))
                             peer_thread.daemon = True
                             peer_thread.start()
                             st.session_state.connected = True
@@ -548,16 +548,18 @@ def main():
             try:
                 if st.session_state.connected == True:
                     response = announce_to_tracker(file_name = "random_2MB.txt", event="stopped")
+                    message_queue.put(f"Peer: {PEER_ID} shutting down...")
+                    message_queue.put(f"Peer: {PEER_ID} offline")
                 else:
                     st.write("Exit without connect to network")
                 # Signal the peer server to stop and wait for it to exit
-                st.session_state.stop_event .set()
+                st.session_state.stop_event.set()
                 time.sleep(1)  # Ensure the server has time to shut down
                 st.stop()
             except Exception as e:
                 st.error(f"An error occurred: {e}")
         else:
-            st.write("Pls select an option")    
+            st.write("Please select an option")    
         ### RESULT DISPLAY #####
         # Display logs in the sidebar
         st.sidebar.header("Result Logs")
@@ -576,8 +578,6 @@ def main():
                     st.write(f"- {file}")
             else:
                 st.write("No files found or invalid directory.")
-
-         
 
 if __name__ == "__main__":
     main()

@@ -10,7 +10,7 @@ import zlib
 
 # Configuration section
 PEER_DOWNLOAD_DIR = "Torrent-like-network-application/Client_repos"  # Directory of client
-TRACKER_IP = '192.168.130.147'  # Tracker IP address
+TRACKER_IP = '192.168.1.7'  # Tracker IP address
 TRACKER_PORT = 12340  # Tracker Port
 PEER_PORT = 12344 # Peer port for download/upload
 PEER_ID = "peer_4"  # Unique peer ID for this client
@@ -394,8 +394,8 @@ def choose_file():
     while True:
         print("Which file are you interested in:")
         print("1. random_2MB.txt")
-        print("2. random_3MB.txt")
-        print("3. random_4MB.txt")
+        print("2. random_4MB.txt")
+        print("3. random_8MB.txt")
         choice = input("Choose an option: ")
         if choice == "1":
             return "random_2MB.txt"   

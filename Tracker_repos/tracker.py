@@ -9,7 +9,7 @@ import sys
 import zlib
 
 ########## Configuration ##########
-IPV4_ADDRESS = '192.168.130.147'            # Tracker host machine address
+IPV4_ADDRESS = '192.168.1.7'            # Tracker host machine address
 TRACKER_PORT = 12340                        # Default port for the tracker
 TRACKER_ID = "center_tracker"               # Center tracker id
 COMPACT_FLAG = False                        # Compact flag for compacted peer list response
